@@ -7,7 +7,7 @@ import torchvision
 import scipy
 import torch.nn as nn
 import torchvision.transforms as transforms
-from torchvision.datasets import Flowers102, FGVCAircraft, DTD,
+from torchvision.datasets import Flowers102, FGVCAircraft, DTD
 from torch.utils.data import DataLoader, Subset
 from tqdm.auto import tqdm
 import numpy as np
