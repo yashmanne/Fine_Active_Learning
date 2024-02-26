@@ -1,13 +1,13 @@
-#Yash Manne
-#2/23/2024
+# Yash Manne
+# 2/23/2024
 
 import torch
 import torchvision
-#from torchinfo import summary
+# from torchinfo import summary
 import scipy
 import torch.nn as nn
 import torchvision.transforms as transforms
-from torchvision.datasets import Flowers102, FGVCAircraft, Food101
+from torchvision.datasets import Flowers102, FGVCAircraft, DTD,
 from torch.utils.data import DataLoader, Subset
 from tqdm.auto import tqdm
 import numpy as np
@@ -19,7 +19,7 @@ class ModelClass:
     A class to manage EfficientNet Finetuning pipeline on Flowers102, FGVCAircraft, and Food101 datasets.
 
     Attributes:
-        dataset (str): Name of the dataset. Options: Flowers102, FGVCAircraft, Food101
+        dataset (str): Name of the dataset. Options: Flowers102, FGVCAircraft, DTD
         preprocess_transform (torchvision.transforms.Compose): Preprocessing transformation for input data.
         AL_method (str): Active learning method used for subset selection
         num_samples (int): Number of samples per class to subset for fine tuning
@@ -31,6 +31,7 @@ class ModelClass:
         test_subset (torch.utils.data.Dataset): Test dataset.
         model (torch.nn.Module): EfficientNet B1 with modified last affine layer.
     """
+
     def __init__(self,
                  dataset_name,
                  preprocess_transform=None,
@@ -54,13 +55,13 @@ class ModelClass:
         all_dataset_modules = {
             "Flowers102": Flowers102,
             "FGVCAircraft": FGVCAircraft,
-            "Food101": Food101
+            "DTD": DTD
         }
         self.dataset_module = all_dataset_modules[self.dataset]
         all_dataset_classes = {
             "Flowers102": 102,
-            "FGVCAircraft": 102,
-            "Food101": 101,
+            "FGVCAircraft": 100,
+            "DTD": 47,
         }
         self.num_classes = all_dataset_classes[self.dataset]
         self.AL_method = AL_method if AL_method else 'SimpleRandom'
@@ -68,6 +69,12 @@ class ModelClass:
         # Note that the train/test for Flowers102 is 10xNclasses so num_samples must be <10
         if self.dataset == 'Flowers102':
             assert self.num_samples <= 10, f"Expected num_samples <=10, got {self.num_samples}."
+        # Note that the train/test for DTD is 40xNclasses so num_samples must be <10
+        if self.dataset == 'FGVCAircraft':
+            assert self.num_samples <= 100, f"Expected num_samples <=100, got {self.num_samples}."
+        # Note that the train/test for DTD is 40xNclasses so num_samples must be <10
+        if self.dataset == 'DTD':
+            assert self.num_samples <= 40, f"Expected num_samples <=40, got {self.num_samples}."
 
         # Define transforms for preprocessing
         if preprocess_transform:
@@ -102,7 +109,7 @@ class ModelClass:
         full_dataset = self.dataset_module(root="./data/", split=split,
                                            transform=self.preprocess_transform, download=True)
         # self.full_dataset = full_dataset
-        sample_method = self.AL_method if split=="train" else "StratifiedRandomSample"
+        sample_method = self.AL_method if split == "train" else "StratifiedRandomSample"
         if split != "test":
             subset_indices = self._data_subset_indices(full_dataset, sample_method=sample_method)
             sub_dataset = Subset(full_dataset, indices=subset_indices)
@@ -126,7 +133,7 @@ class ModelClass:
             sample_method = self.AL_method
         if sample_method == 'SimpleRandom':
             torch.manual_seed(self.seed)
-            subset_indices = torch.randperm(len(full_dataset))[:self.num_samples*self.num_classes]
+            subset_indices = torch.randperm(len(full_dataset))[:self.num_samples * self.num_classes]
 
         elif sample_method == 'StratifiedRandomSample':
             subset_indices = self._get_stratified_random_sample(full_dataset)
@@ -198,13 +205,13 @@ class ModelClass:
                 images, labels = images.to(self.device), labels.to(self.device)
                 # Forward pass
                 outputs = model(images)
-                val_loss += loss_func(outputs, labels)*labels.size(0)
+                val_loss += loss_func(outputs, labels) * labels.size(0)
                 # Compute accuracy and accumulate
                 _, predicted = torch.max(outputs.data, 1)
                 correct += (predicted == labels).sum().item()
 
                 # Log one batch of images to the dashboard, always same batch_idx.
-                if (i==batch_idx) and log_images:
+                if (i == batch_idx) and log_images:
                     log_image_table(images, predicted, labels, outputs.softmax(dim=1))
         return val_loss / len(valid_dl.dataset), correct / len(valid_dl.dataset)
 
@@ -254,13 +261,13 @@ class ModelClass:
         model.to(device)
 
         # Checkpointing variables
-        early_stopping_patience = 2
+        early_stopping_patience = 5
         best_val_loss = np.inf
         patience_counter = 0
 
         # Start training
         for epoch in range(config.epochs):
-            print(f"Epoch {epoch+1}/{config.epochs}")
+            print(f"Epoch {epoch + 1}/{config.epochs}")
             print('-' * 10)
             # Training Phase
             model.train()
@@ -283,7 +290,8 @@ class ModelClass:
             # Validation phase
             model.eval()
             # store images if needed
-            val_loss, val_accuracy = self.validate_model(model, valid_dl=val_loader, loss_func=criterion, log_images=False)
+            val_loss, val_accuracy = self.validate_model(model, valid_dl=val_loader, loss_func=criterion,
+                                                         log_images=False)
                                                      # log_images=(epoch == (config.epochs - 1)))
             epoch_loss = running_loss / len(train_loader.dataset)
             # Log epoch metrics
@@ -292,7 +300,8 @@ class ModelClass:
                 "val/val_loss": val_loss,
                 "val/val_accuracy": val_accuracy}
             wandb.log(epoch_metrics)
-            print(f"Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}")
+            print(
+                f"Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}")
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
@@ -301,10 +310,11 @@ class ModelClass:
             else:
                 patience_counter += 1
                 if patience_counter >= early_stopping_patience:
-                    print(f'Early stopping triggered after {epoch+1} epochs.')
+                    print(f'Early stopping triggered after {epoch + 1} epochs.')
                     break
         # Log best model to Wandb
-        artifact = wandb.Artifact(name="best-model", type="model")
+        # (dataset so that we log a model for each run rather than 1 per project)
+        artifact = wandb.Artifact(name="best-model", type="dataset")
         artifact.add_file(local_path='./best_model.pth')
         wandb.log_artifact(artifact)
 
@@ -312,7 +322,8 @@ class ModelClass:
         model.load_state_dict(torch.load('./best_model.pth'))
         self.model = model
         model.eval()
-        test_loss, test_accuracy = self.validate_model(model, valid_dl=test_loader, loss_func=criterion, log_images=False)
+        test_loss, test_accuracy = self.validate_model(model, valid_dl=test_loader, loss_func=criterion,
+                                                       log_images=False)
         wandb.summary['test_accuracy'] = test_accuracy
         run_id = wandb.run.id
         wandb.finish()
@@ -332,7 +343,7 @@ class ModelClass:
             early_terminate_args (dict): dict of args for Hyperband early termination. Default None
             num_epochs (int): number of epochs to run each sweep. Default is 50
         Returns:
-
+            None
         """
         # check method validity
         valid_methods = ['random', 'grid', 'bayes']
@@ -377,9 +388,8 @@ class ModelClass:
                 'eta': 2,       # the bracket multiplier
                 # 's': 2,         # total number of brackets
                 # 'max_iter': parameters_dict['epochs']['value'],
-        }
+            }
         # set up sweep config dictionary
-
         sweep_config = {
             'method': method,
             'metric': {'name': 'val/val_loss', 'goal': 'minimize'},
@@ -395,19 +405,53 @@ class ModelClass:
         sweep_id = wandb.sweep(sweep=sweep_config,
                                project=f"{self.dataset}-{self.num_samples}-{self.AL_method}-{self.seed}")
 
-        # Get Agent to run sweeps
+        # define wrapper of objective function with 1 argument.
         def objective_func(config=None):
             self.train_model(wandb_config=config, return_model=False)
 
+        # Get Agent to run sweeps
         wandb.agent(sweep_id, function=objective_func, count=max_runs)
 
         return
+
+
+# Run All Combinations
+def run_all_combinations(datasets, num_samples, al_methods, random_seeds, hyperparameter_kwargs):
+    """
+    Instantiate a ModelClass for each dataset-num_samples-AL-method-random_seed and
+    use the ModelClass.hyperparameter_sweep()
+
+    Parameters:
+        datasets (list): strings of datasets to use (must be defined within ModelClass)
+        num_samples (list): ints denoting the number of samples per class.
+        al_methods (list): strs denoting which AL_method to use to subset the train set.
+        random_seeds (list): ints denoting the random seed for random generators in the selection/training process
+        hyperparameter_kwargs (dict): relevant arguments for ModelClass.hyperparameter_sweep().
+    Returns:
+        None
+    """
+    for dataset in tqdm(datasets):
+        for num_s in num_samples:
+            for al_m in al_methods:
+                for rs in random_seeds:
+                    try:
+                        MC = ModelClass(dataset_name=dataset, AL_method=al_m, num_samples=num_s, seed=rs)
+                    except:
+                        print(f"ModelClass can't be instantiated with this combination {dataset}, {num_s}, {al_m}, {rs}.")
+                        continue
+                    try:
+                        MC.hyperparameter_sweep(**hyperparameter_kwargs)
+                    except Exception as E:
+                        print(f"An error occurred during the hyperparameter sweep.")
+                        print(E)
+    return
+
+
 # Auxillary Functions
 def log_image_table(images, predicted, labels, probs):
     "Log a wandb.Table with (img, pred, target, scores)"
     # 🐝 Create a wandb Table to log images, labels and predictions to
-    table = wandb.Table(columns=["image", "pred", "target"]+[f"score_{i}" for i in range(10)])
+    table = wandb.Table(columns=["image", "pred", "target"] + [f"score_{i}" for i in range(10)])
     for img, pred, targ, prob in zip(images.to("cpu"), predicted.to("cpu"), labels.to("cpu"), probs.to("cpu")):
-        table.add_data(wandb.Image(img[0].numpy()*255), pred, targ, *prob.numpy())
-    wandb.log({"predictions_table":table}, commit=False)
-
+        table.add_data(wandb.Image(img[0].numpy() * 255), pred, targ, *prob.numpy())
+    wandb.log({"predictions_table": table}, commit=False)
