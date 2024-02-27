@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, Subset
 from tqdm.auto import tqdm, trange
 import numpy as np
 import wandb
+import copy
 
 
 class ModelClass:
@@ -232,7 +233,7 @@ class ModelClass:
                 Tuple: Model WandB RunID and best validation loss
         """
         torch.manual_seed(self.seed)
-        model = self.model
+        model = copy.deepcopy(self.model)
         # Initialize WandB
         if wandb_config:
             wandb.init(config=wandb_config)
@@ -399,8 +400,11 @@ class ModelClass:
         sweep_id = wandb.sweep(sweep=sweep_config,
                                project=f"{self.dataset}-{self.num_samples}-{self.AL_method}-{self.seed}")
 
+        # get original state_dict
+        og_state_dict = copy.deepcopy(self.model.state_dict())
         # define wrapper of objective function with 1 argument.
         def objective_func(config=None):
+            self.model = self.model.load_state_dict(og_state_dict)
             self.train_model(wandb_config=config, return_model=False)
 
         # Get Agent to run sweeps
