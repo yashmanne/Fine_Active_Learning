@@ -274,18 +274,12 @@ class ModelClass:
             running_loss = 0.0
             for t_i, (images, labels) in enumerate(tqdm(train_loader)):
                 images, labels = images.to(device), labels.to(device)
-
                 optimizer.zero_grad()
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item() * images.size(0)
-                # Log metrics in WandB
-                metrics = {"train/train_loss": loss}
-                # log metrics if not at the end of epoch (if at the end, log the val metrics together
-                # if t_i < len(train_loader)
-                wandb.log(metrics)
 
             # Validation phase
             model.eval()
@@ -294,7 +288,7 @@ class ModelClass:
                                                          log_images=False)
                                                      # log_images=(epoch == (config.epochs - 1)))
             epoch_loss = running_loss / len(train_loader.dataset)
-            # Log epoch metrics
+            # Log epoch metrics in wandb
             epoch_metrics = {
                 "train/epoch_loss": epoch_loss,
                 "val/val_loss": val_loss,
@@ -312,7 +306,7 @@ class ModelClass:
                 if patience_counter >= early_stopping_patience:
                     print(f'Early stopping triggered after {epoch + 1} epochs.')
                     break
-        # Log best model to Wandb
+        # Log the best model to Wandb
         # (dataset so that we log a model for each run rather than 1 per project)
         artifact = wandb.Artifact(name="best-model", type="dataset")
         artifact.add_file(local_path='./best_model.pth')
@@ -353,7 +347,7 @@ class ModelClass:
         if parameters_dict is None:
             if method == 'grid':
                 lr_dict = {'values': [1e-3, 5e-4]}
-                bs_dict = {'values': [8, 16, 32, 64, 128]}
+                bs_dict = {'value': 128}
             else:
                 lr_dict = {
                     'distribution': 'q_log_uniform_values',
@@ -378,7 +372,7 @@ class ModelClass:
         # https://open.gitcode.host/wandb-docs/sweeps/configuration.html#stopping-criteria
         # https://2020blogfor.github.io/posts/2020/04/hyperband/
         # essentially checks at various iterations that our metric is logged (epochs for us)
-        # whether not not to keep training.
+        # whether or not to keep training.
         # ex. training method of s=3 and eta=2, max_iter checks at epoch: 6, 12 & 25
         #     training method of eta=2, min_iter=5, checks at epoch 5, 10, 20, 40
         if early_terminate_args is None:
@@ -431,13 +425,14 @@ def run_all_combinations(datasets, num_samples, al_methods, random_seeds, hyperp
         None
     """
     for dataset in tqdm(datasets):
-        for num_s in num_samples:
-            for al_m in al_methods:
-                for rs in random_seeds:
+        for num_s in tqdm(num_samples):
+            for al_m in tqdm(al_methods):
+                for rs in tqdm(random_seeds):
                     try:
                         MC = ModelClass(dataset_name=dataset, AL_method=al_m, num_samples=num_s, seed=rs)
-                    except:
+                    except Exception as E:
                         print(f"ModelClass can't be instantiated with this combination {dataset}, {num_s}, {al_m}, {rs}.")
+                        print(E)
                         continue
                     try:
                         MC.hyperparameter_sweep(**hyperparameter_kwargs)
