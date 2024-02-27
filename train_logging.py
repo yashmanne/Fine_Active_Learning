@@ -173,6 +173,7 @@ class ModelClass:
         Returns:
             torch.nn.Module: Machine learning model.
         """
+        torch.manual_seed(self.seed)
         # Load EfficientNet-B1 model
         model = torchvision.models.efficientnet_b1(weights="DEFAULT")
         # update the number of classes in the last layers
@@ -264,6 +265,7 @@ class ModelClass:
         # Checkpointing variables
         early_stopping_patience = 5
         best_val_loss = np.inf
+        acc_at_best_val_loss = 0
         patience_counter = 0
 
         # Start training
@@ -299,6 +301,7 @@ class ModelClass:
                 f"Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}")
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                acc_at_best_val_loss = val_accuracy
                 patience_counter = 0
                 # Save the best model if needed
                 torch.save(model.state_dict(), 'best_model.pth')
@@ -319,6 +322,11 @@ class ModelClass:
         model.eval()
         test_loss, test_accuracy = self.validate_model(model, valid_dl=test_loader, loss_func=criterion,
                                                        log_images=False)
+        # Log best val_loss at the end again
+        wandb.log({
+            "val/val_loss": best_val_loss,
+            "val/val_accuracy": acc_at_best_val_loss
+        })
         wandb.summary['test_accuracy'] = test_accuracy
         run_id = wandb.run.id
         wandb.finish()
