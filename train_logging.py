@@ -314,7 +314,7 @@ class ModelClass:
 
         # Calculate best test performance
         model.load_state_dict(torch.load('./best_model.pth'))
-        self.model = model
+        # self.model = model
         model.eval()
         test_loss, test_accuracy = self.validate_model(model, valid_dl=test_loader, loss_func=criterion,
                                                        log_images=False)
