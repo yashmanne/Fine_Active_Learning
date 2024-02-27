@@ -401,10 +401,10 @@ class ModelClass:
                                project=f"{self.dataset}-{self.num_samples}-{self.AL_method}-{self.seed}")
 
         # get original state_dict
-        og_state_dict = copy.deepcopy(self.model.state_dict())
+        # og_state_dict = copy.deepcopy(self.model.state_dict())
         # define wrapper of objective function with 1 argument.
         def objective_func(config=None):
-            self.model = self.model.load_state_dict(og_state_dict)
+            self.model = self._get_model()
             self.train_model(wandb_config=config, return_model=False)
 
         # Get Agent to run sweeps
