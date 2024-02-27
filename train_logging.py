@@ -9,7 +9,7 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 from torchvision.datasets import Flowers102, FGVCAircraft, DTD
 from torch.utils.data import DataLoader, Subset
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 import numpy as np
 import wandb
 
@@ -266,7 +266,7 @@ class ModelClass:
         patience_counter = 0
 
         # Start training
-        for epoch in range(config.epochs):
+        for epoch in trange(config.epochs):
             print(f"Epoch {epoch + 1}/{config.epochs}")
             print('-' * 10)
             # Training Phase
