@@ -9,9 +9,13 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 from torchvision.datasets import Flowers102, FGVCAircraft, DTD
 from torch.utils.data import DataLoader, Subset
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 import numpy as np
 import wandb
+import copy
+from sklearn_extra.cluster import KMedoids
+from sklearn.metrics.pairwise import pairwise_distances_argmin_min
+from scipy.spatial import distance
 
 
 class ModelClass:
@@ -65,6 +69,7 @@ class ModelClass:
         }
         self.num_classes = all_dataset_classes[self.dataset]
         self.AL_method = AL_method if AL_method else 'SimpleRandom'
+        print(AL_method)
         self.num_samples = num_samples
         # Note that the train/test for Flowers102 is 10xNclasses so num_samples must be <10
         if self.dataset == 'Flowers102':
@@ -129,6 +134,7 @@ class ModelClass:
         Returns:
            torch.Tensor: Indices for the subset.
         """
+        print(sample_method)
         if sample_method is None:
             sample_method = self.AL_method
         if sample_method == 'SimpleRandom':
@@ -137,6 +143,9 @@ class ModelClass:
 
         elif sample_method == 'StratifiedRandomSample':
             subset_indices = self._get_stratified_random_sample(full_dataset)
+
+        elif sample_method == 'K-Mediods':
+            subset_indices = self._get_K_medioids_sample(full_dataset)
         else:
             raise ValueError(f"AL method {sample_method} not implemented")
         return subset_indices
@@ -164,6 +173,60 @@ class ModelClass:
             subset_indices.extend(indices[:self.num_samples])
         return torch.tensor(subset_indices)
 
+    def _get_K_medioids_sample(self, full_dataset):
+
+        # Define a function to calculate the uncertainty or informativeness
+        def calculate_uncertainty(cluster, cluster_center):
+            distances = distance.cdist(cluster, [cluster_center], 'euclidean')
+            return distances.flatten()
+
+        #Extract the features of all unlabelled datapoints
+        feature_extractor = nn.Sequential(*list((self._get_model()).children())[:-1]) #Select all layers except the last]
+        feature_extractor.eval()
+
+        #print('Feature Extractor:', feature_extractor)
+        train_features = []
+        for image, _ in full_dataset:
+            with torch.no_grad():
+                features = feature_extractor(image.unsqueeze(0))
+            train_features.append(features.squeeze().flatten().numpy())
+        train_features = np.array(train_features)
+
+        full_dataset = train_features
+        print('Full Dataset Shape:', full_dataset.shape)
+
+        #Fit K-Medoids on the full dataset
+        num_clusters = 47
+        kmedoids = KMedoids(n_clusters=num_clusters, random_state=self.seed)
+        kmedoids.fit(full_dataset)
+
+        # Get the centers of the clusters
+        cluster_centers = torch.tensor(full_dataset[kmedoids.medoid_indices_])
+
+        # Initialize labeled and unlabeled datasets
+        subset_indices = []
+        #unlabeled_indices = list(range(len(full_dataset)))  # Initially, all indices are unlabeled
+
+        subset_indices = []
+        for i, medoid_idx in enumerate(kmedoids.medoid_indices_):
+            cluster_indices = (kmedoids.labels_ == i)
+            cluster_data_indices = np.where(cluster_indices)[0]  # Get indices directly using np.where
+            cluster_data = train_features[cluster_indices]
+
+            # Calculate distances to the medoid
+            distances_to_medoid = np.linalg.norm(cluster_data - cluster_centers[i].numpy(), axis=1)
+
+            # Sort distances and extract the top 10 indices
+            closest_to_medoid_indices = np.argsort(distances_to_medoid)[:10]
+            closest_to_medoid_indices = [cluster_data_indices[idx] for idx in closest_to_medoid_indices]  # Map back to original indices
+            subset_indices.extend(closest_to_medoid_indices)
+
+        #subset_indices = np.unique(subset_indices)  # Take unique indices
+
+        print(subset_indices)
+        return torch.tensor(subset_indices)
+
+
     def _get_model(self):
         """
         Utility function that initializes and configures the machine learning model
@@ -172,6 +235,7 @@ class ModelClass:
         Returns:
             torch.nn.Module: Machine learning model.
         """
+        torch.manual_seed(self.seed)
         # Load EfficientNet-B1 model
         model = torchvision.models.efficientnet_b1(weights="DEFAULT")
         # update the number of classes in the last layers
@@ -232,7 +296,7 @@ class ModelClass:
                 Tuple: Model WandB RunID and best validation loss
         """
         torch.manual_seed(self.seed)
-        model = self.model
+        model = copy.deepcopy(self.model)
         # Initialize WandB
         if wandb_config:
             wandb.init(config=wandb_config)
@@ -263,10 +327,11 @@ class ModelClass:
         # Checkpointing variables
         early_stopping_patience = 5
         best_val_loss = np.inf
+        acc_at_best_val_loss = 0
         patience_counter = 0
 
         # Start training
-        for epoch in range(config.epochs):
+        for epoch in trange(config.epochs):
             print(f"Epoch {epoch + 1}/{config.epochs}")
             print('-' * 10)
             # Training Phase
@@ -274,18 +339,12 @@ class ModelClass:
             running_loss = 0.0
             for t_i, (images, labels) in enumerate(tqdm(train_loader)):
                 images, labels = images.to(device), labels.to(device)
-
                 optimizer.zero_grad()
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item() * images.size(0)
-                # Log metrics in WandB
-                metrics = {"train/train_loss": loss}
-                # log metrics if not at the end of epoch (if at the end, log the val metrics together
-                # if t_i < len(train_loader)
-                wandb.log(metrics)
 
             # Validation phase
             model.eval()
@@ -294,7 +353,7 @@ class ModelClass:
                                                          log_images=False)
                                                      # log_images=(epoch == (config.epochs - 1)))
             epoch_loss = running_loss / len(train_loader.dataset)
-            # Log epoch metrics
+            # Log epoch metrics in wandb
             epoch_metrics = {
                 "train/epoch_loss": epoch_loss,
                 "val/val_loss": val_loss,
@@ -304,6 +363,7 @@ class ModelClass:
                 f"Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}")
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                acc_at_best_val_loss = val_accuracy
                 patience_counter = 0
                 # Save the best model if needed
                 torch.save(model.state_dict(), 'best_model.pth')
@@ -312,7 +372,7 @@ class ModelClass:
                 if patience_counter >= early_stopping_patience:
                     print(f'Early stopping triggered after {epoch + 1} epochs.')
                     break
-        # Log best model to Wandb
+        # Log the best model to Wandb
         # (dataset so that we log a model for each run rather than 1 per project)
         artifact = wandb.Artifact(name="best-model", type="dataset")
         artifact.add_file(local_path='./best_model.pth')
@@ -320,10 +380,15 @@ class ModelClass:
 
         # Calculate best test performance
         model.load_state_dict(torch.load('./best_model.pth'))
-        self.model = model
+        # self.model = model
         model.eval()
         test_loss, test_accuracy = self.validate_model(model, valid_dl=test_loader, loss_func=criterion,
                                                        log_images=False)
+        # Log best val_loss at the end again
+        wandb.log({
+            "val/val_loss": best_val_loss,
+            "val/val_accuracy": acc_at_best_val_loss
+        })
         wandb.summary['test_accuracy'] = test_accuracy
         run_id = wandb.run.id
         wandb.finish()
@@ -353,7 +418,7 @@ class ModelClass:
         if parameters_dict is None:
             if method == 'grid':
                 lr_dict = {'values': [1e-3, 5e-4]}
-                bs_dict = {'values': [8, 16, 32, 64, 128]}
+                bs_dict = {'value': 128}
             else:
                 lr_dict = {
                     'distribution': 'q_log_uniform_values',
@@ -378,7 +443,7 @@ class ModelClass:
         # https://open.gitcode.host/wandb-docs/sweeps/configuration.html#stopping-criteria
         # https://2020blogfor.github.io/posts/2020/04/hyperband/
         # essentially checks at various iterations that our metric is logged (epochs for us)
-        # whether not not to keep training.
+        # whether or not to keep training.
         # ex. training method of s=3 and eta=2, max_iter checks at epoch: 6, 12 & 25
         #     training method of eta=2, min_iter=5, checks at epoch 5, 10, 20, 40
         if early_terminate_args is None:
@@ -405,8 +470,11 @@ class ModelClass:
         sweep_id = wandb.sweep(sweep=sweep_config,
                                project=f"{self.dataset}-{self.num_samples}-{self.AL_method}-{self.seed}")
 
+        # get original state_dict
+        # og_state_dict = copy.deepcopy(self.model.state_dict())
         # define wrapper of objective function with 1 argument.
         def objective_func(config=None):
+            self.model = self._get_model()
             self.train_model(wandb_config=config, return_model=False)
 
         # Get Agent to run sweeps
@@ -431,14 +499,16 @@ def run_all_combinations(datasets, num_samples, al_methods, random_seeds, hyperp
         None
     """
     for dataset in tqdm(datasets):
-        for num_s in num_samples:
-            for al_m in al_methods:
-                for rs in random_seeds:
+        for num_s in tqdm(num_samples):
+            for al_m in tqdm(al_methods):
+                for rs in tqdm(random_seeds):
                     try:
                         MC = ModelClass(dataset_name=dataset, AL_method=al_m, num_samples=num_s, seed=rs)
-                    except:
+                    except Exception as E:
                         print(f"ModelClass can't be instantiated with this combination {dataset}, {num_s}, {al_m}, {rs}.")
+                        print(E)
                         continue
+
                     try:
                         MC.hyperparameter_sweep(**hyperparameter_kwargs)
                     except Exception as E:
