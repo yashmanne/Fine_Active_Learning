@@ -284,10 +284,10 @@ class ModelClass:
         #lprk = log_density/np.sum(log_density, axis=1) #Shape: (num_samples, 47)
 
         #I think we jsut need the last one?
-        soft_assignment = soft_assignment #Shape: (num_samples, 47)
+        soft_assignments = soft_assignments #Shape: (num_samples, 47)
         full_dataset = full_dataset #Shape: (num_samples, feature_dim)
 
-        sum_zs_in_cf = np.matmul(soft_assignment.T, full_dataset) #Shape: (47, feature_dim), I'm thinking this is the weighted probability per class
+        sum_zs_in_cf = np.matmul(soft_assignments.T, full_dataset) #Shape: (47, feature_dim), I'm thinking this is the weighted probability per class
         abs_cf = np.sum(soft_assignments, axis = 1) #Shape: (47), I'm thinking this should be the total sum of the probabilities for each class
         mean_cf = sum_zs_in_cf/abs_cf #shape: (47, feature_dim)
         lpr = ((full_dataset - mean_cf)**2)/np.sum((full_dataset - mean_cf)**2) #(num_samples, 47)
