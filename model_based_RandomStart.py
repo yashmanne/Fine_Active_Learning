@@ -17,8 +17,8 @@ from scipy.spatial import distance
 from train_logging import ModelClass
 
 class ModelAL(ModelClass):
-    def __init__(self, dataset_name, preprocess_transform=None, AL_method=None, num_samples=5, seed=1,
-                 cold_start_n=3, cold_start_epochs=5, cold_start_method='SimpleRandom'):
+    def __init__(self, dataset_name, preprocess_transform=None, AL_method=None, num_samples=10, seed=1,
+                 cold_start_n=5, cold_start_epochs=5, cold_start_method='SimpleRandom'):
         """
         Initializes ModelClass with the specified parameters.
 
@@ -27,9 +27,9 @@ class ModelAL(ModelClass):
             preprocess_transform (torchvision.transforms.Compose, optional): Preprocessing transformation for input data.
             AL_method (str, optional): Active learning method. Default is 'Entropy'
                 Options: 'Entropy', 'LeastMargin', 'LeastConfidence',
-            num_samples (int): Number of samples per class to subset original dataset. Default is 5
+            num_samples (int): Number of samples per class to subset original dataset. Default is 10
             seed (int): Random seed for reproducibility. Default is 1
-            cold_start_n (float): number of samples to use for cold-start training.
+            cold_start_n (float): number of samples to use for cold-start training. Default is 5
             cold_start_epochs (float): number of epochs to train using cold-start-method.
             cold_start_method (str): Sampling method to initialize model training. Options: 'SimpleRandom', 'StratifiedRandomSample', 'K-Medoids'
         """
@@ -79,16 +79,15 @@ class ModelAL(ModelClass):
         config['epochs'] = self.cold_start_epochs
         # Call train_model_inner function
         model, best_val_loss = self.train_model_inner(
-            model=model, config=config, train_subset=self.cold_start_train_subset,
-            lr=lr, batch_size=batch_size, num_epochs=self.cold_start_epochs)
+            model=model, config=config, train_subset=self.cold_start_train_subset)
         # Now, get new subset of train_data based on the current model.
+        self.model = model
         self.train_subset = self.get_train_subset()
 
         # Call train_model_inner function
         config['epochs'] = OG_epochs - self.cold_start_epochs
         model, best_val_loss = self.train_model_inner(
-            model=model, config=config, train_subset=self.train_subset,
-            lr=lr, batch_size=batch_size, num_epochs=self.cold_start_epochs, log_test=True)
+            model=model, config=config, train_subset=self.train_subset, log_test=True)
 
         # output model
         run_id = wandb.run.id
@@ -132,7 +131,7 @@ class ModelAL(ModelClass):
             if method == 'Entropy':
                 tmp_scores = torch.sum(-probs * torch.log(probs + 1e-8), dim=1)    # NxC
             elif method == 'LeastConfidence':
-                tmp_scores = 1 - torch.max(probs, dim=1).values    # NxC
+                tmp_scores = 1 - torch.max(probs, dim=1).values    # N,
             elif method == 'LeastMargin':
                 top_k = torch.topk(probs, 2, dim=1).values
                 tmp_scores = 1 - (top_k[:, 0] - top_k[:, 1])
@@ -155,8 +154,7 @@ class ModelAL(ModelClass):
 
         return ind_indices
 
-    def train_model_inner(self, model, config, train_subset,
-                          lr=None, batch_size=None, num_epochs=None, log_test=False):
+    def train_model_inner(self, model, config, train_subset, log_test=False):
         """
         Trains the machine learning model & logs the runs to WandB.
 
