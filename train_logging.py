@@ -189,7 +189,7 @@ class ModelClass:
         print('Full Dataset Shape:', full_dataset.shape)
 
         #Fit K-Medoids on the full dataset
-        num_clusters = 47
+        num_clusters = self.num_classes
         kmedoids = KMedoids(n_clusters=num_clusters, random_state=self.seed)
         kmedoids.fit(full_dataset)
 
@@ -201,6 +201,7 @@ class ModelClass:
         #unlabeled_indices = list(range(len(full_dataset)))  # Initially, all indices are unlabeled
 
         subset_indices = []
+        # shuffle distance matrix
         for i, medoid_idx in enumerate(kmedoids.medoid_indices_):
             cluster_indices = (kmedoids.labels_ == i)
             cluster_data_indices = np.where(cluster_indices)[0]  # Get indices directly using np.where
@@ -213,10 +214,13 @@ class ModelClass:
             closest_to_medoid_indices = np.argsort(distances_to_medoid)[:self.num_samples]
             closest_to_medoid_indices = [cluster_data_indices[idx] for idx in closest_to_medoid_indices]  # Map back to original indices
             subset_indices.extend(closest_to_medoid_indices)
+            # add mask to set values to np.inf
+            # reloop to ensure len(subset_indices.unqiue() is the expected number of samples)
+
 
         #subset_indices = np.unique(subset_indices)  # Take unique indices
 
-        print(subset_indices)
+        print(len(subset_indices), len(np.unique(subset_indices)))
         return torch.tensor(subset_indices)
 
     def _get_LSS_sample(self, full_dataset):
@@ -245,7 +249,7 @@ class ModelClass:
         ### Apply soft k-means clustering ###
         def soft_kmeans(X, k, beta=1.0, max_iters=100, tol=1e-4):
             n_samples, n_features = X.shape
-            
+            # TODO multiple intializations and track one with least overall distances
             # Initialize centroids randomly
             np.random.seed(self.seed)
             centroids = X[np.random.choice(n_samples, k, replace=False)]
@@ -253,8 +257,10 @@ class ModelClass:
             for _ in range(max_iters):
                 # Compute distances and soft assignments
                 distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
+                print(distances.shape)
                 soft_assignments = np.exp(-distances ** 2 / beta)
-                soft_assignments /= np.sum(soft_assignments, axis=1, keepdims=True)
+                print('SA', soft_assignments.shape)
+                soft_assignments /= np.sum(soft_assignments, axis=0, keepdims=True)
                 
                 # Update centroids
                 new_centroids = np.dot(soft_assignments.T, X) / np.sum(soft_assignments, axis=0, keepdims=True).T
@@ -267,7 +273,7 @@ class ModelClass:
             
             return centroids, soft_assignments
         
-        k = 47
+        k = self.num_classes
 
         # Run Soft K-means algorithm
         centroids, soft_assignments = soft_kmeans(full_dataset, k)
@@ -283,7 +289,7 @@ class ModelClass:
         full_dataset = full_dataset #Shape: (num_samples, feature_dim)
         print('Soft Assignments Shape:', soft_assignments.shape)
         sum_zs_in_cf = np.matmul(soft_assignments.T, full_dataset) #Shape: (47, feature_dim), I'm thinking this is the weighted probability per class
-        abs_cf = np.sum(soft_assignments, axis = 1)[:, np.newaxis] #Shape: (47), I'm thinking this should be the total sum of the probabilities for each class
+        abs_cf = np.sum(soft_assignments, axis = 0)[:, np.newaxis] #Shape: (47), I'm thinking this should be the total sum of the probabilities for each class
         mean_cf = sum_zs_in_cf/abs_cf #shape: (47, feature_dim)
         print('Mean_cf Shape:', mean_cf.shape)
         
@@ -292,7 +298,7 @@ class ModelClass:
             mean_ki = mean_cf[ki].reshape(1, -1)
             this_lpr = np.sum(((full_dataset - mean_ki)**2), axis = 1) #(num_samples,)
             lpr[:, ki] = this_lpr
-        lpr = lpr/lpr.sum(axis=1).reshape(1,-1)
+        lpr = lpr/lpr.sum(axis=1).reshape(-1,1)
         print('lpr shape: ', lpr.shape)
 
         ### Iterate through the sampling process ###
@@ -301,29 +307,40 @@ class ModelClass:
         min_row_indices = np.argmin(lpr, axis=0)
         subset_indices.extend(min_row_indices)
 
+        #Masked out the indices that we already chose
+        lpr[subset_indices, :] = 0
         #For the next N-1 samples, select the N-1 samples with the highest LPR (The least confident ones)
         # Initialize an empty list to store the indices
-        subset_indices_list = []
 
         # Loop through each column
         #Shuffle columns
-        for col in range(47):
-            # Find the row indices where the current column is the highest
-            max_column_indices = np.argmax(lpr[:, col])
-            # Filter the rows where the current column is the highest
-            rows_with_max_column = lpr[lpr[:, col] == lpr[max_column_indices, col]]
-            # Find the row indices where the current column is the lowest among the filtered rows
-            num_extra_samples = self.num_samples - 1
-            min_row_indices = np.argsort(rows_with_max_column[:, col])[:num_extra_samples]
-            # Get the original indices of the filtered rows
-            original_indices = np.where(np.isin(lpr, rows_with_max_column[min_row_indices]))
-            # Append the original indices to the list
-            subset_indices_list.extend(original_indices[0])
+        lpr = lpr[:, np.random.permutation(k)]
+        while len(subset_indices) < k*self.num_samples:
+            subset_indices_list = []
+            for col in range(k):
+                # Find the row indices where the current column is the highest
+                max_column_indices = np.argmax(lpr[:, col])
+                # Filter the rows where the current column is the highest
+                rows_with_max_column = lpr[lpr[:, col] == lpr[max_column_indices, col]]
+                # Find the row indices where the current column is the lowest among the filtered rows
+                num_extra_samples = self.num_samples - 1
+                min_row_indices = np.argsort(rows_with_max_column[:, col])[:num_extra_samples]
+                # Get the original indices of the filtered rows
+                original_indices = np.where(np.isin(lpr, rows_with_max_column[min_row_indices]))
+                # Append the original indices to the list
+                subset_indices_list.extend(np.unique(original_indices[0]))
+                # mask out values we already append it
+                lpr[np.unique(original_indices[0]), :] = 0
+            subset_indices_list = np.unique(subset_indices_list)
+            remain_add = (k*self.num_samples) - len(subset_indices)
+            subset_indices.extend(subset_indices_list[:remain_add])
+
+
 
         # Convert the list to a numpy array
-        subset_indices_array = np.array(subset_indices_list)
-        print('si array shape: ', subset_indices_array.shape)
-        subset_indices.extend(subset_indices_array)
+        # subset_indices_array = np.array(subset_indices_list)
+        # print('si array shape: ', subset_indices_array.shape)
+        # subset_indices.extend(subset_indices_array)
 
         print(subset_indices)
         return torch.tensor(subset_indices)
