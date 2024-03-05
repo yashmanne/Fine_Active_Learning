@@ -280,15 +280,22 @@ class ModelClass:
         #What should the k be here since it's a soft assignment?
         #log_density = np.log(1/(np.sqrt(2*np.pi)*np.std(Each_k))) - (1/(2*np.std(Each_k)))*(full_dataset - np.mean(Each_k)**2) #shape: (num_samples, 47)
         #lprk = log_density/np.sum(log_density, axis=1) #Shape: (num_samples, 47)
-
         #I think we jsut need the last one?
         soft_assignments = soft_assignments #Shape: (num_samples, 47)
         full_dataset = full_dataset #Shape: (num_samples, feature_dim)
-
+        print('Soft Assignments Shape:', soft_assignments.shape)
         sum_zs_in_cf = np.matmul(soft_assignments.T, full_dataset) #Shape: (47, feature_dim), I'm thinking this is the weighted probability per class
-        abs_cf = np.sum(soft_assignments, axis = 1) #Shape: (47), I'm thinking this should be the total sum of the probabilities for each class
+        abs_cf = np.sum(soft_assignments, axis = 1)[:, np.newaxis] #Shape: (47), I'm thinking this should be the total sum of the probabilities for each class
         mean_cf = sum_zs_in_cf/abs_cf #shape: (47, feature_dim)
-        lpr = ((full_dataset - mean_cf)**2)/np.sum((full_dataset - mean_cf)**2) #(num_samples, 47)
+        print('Mean_cf Shape:', mean_cf.shape)
+        
+        lpr = np.zeros_like(soft_assignments)#Shape: (num_samples, 47)
+        for ki in range(mean_cf.shape[0]):
+            mean_ki = mean_cf[ki].reshape(1, -1)
+            this_lpr = np.sum(((full_dataset - mean_ki)**2), axis = 1) #(num_samples,)
+            lpr[:, ki] = this_lpr
+        lpr = lpr/lpr.sum(axis=1).reshape(1,-1)
+        print('lpr shape: ', lpr.shape)
 
         ### Iterate through the sampling process ###
         subset_indices = []
@@ -301,6 +308,7 @@ class ModelClass:
         subset_indices_list = []
 
         # Loop through each column
+        #Shuffle columns
         for col in range(47):
             # Find the row indices where the current column is the highest
             max_column_indices = np.argmax(lpr[:, col])
@@ -316,10 +324,12 @@ class ModelClass:
 
         # Convert the list to a numpy array
         subset_indices_array = np.array(subset_indices_list)
+        print('si array shape: ', subset_indices_array.shape)
         subset_indices.extend(subset_indices_array)
 
         print(subset_indices)
         return torch.tensor(subset_indices)
+    
     
     def _get_model(self):
         """
