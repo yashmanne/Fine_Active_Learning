@@ -146,6 +146,9 @@ class ModelClass:
 
         elif sample_method == 'K-Mediods':
             subset_indices = self._get_K_medioids_sample(full_dataset)
+
+        elif sample_method == 'LSS':
+            subset_indices = self._get_LSS_sample(full_dataset)
         else:
             raise ValueError(f"AL method {sample_method} not implemented")
         return subset_indices
@@ -174,12 +177,6 @@ class ModelClass:
         return torch.tensor(subset_indices)
 
     def _get_K_medioids_sample(self, full_dataset):
-
-        # Define a function to calculate the uncertainty or informativeness
-        def calculate_uncertainty(cluster, cluster_center):
-            distances = distance.cdist(cluster, [cluster_center], 'euclidean')
-            return distances.flatten()
-
         #Extract the features of all unlabelled datapoints
         feature_extractor = nn.Sequential(*list((self._get_model()).children())[:-1]) #Select all layers except the last]
         feature_extractor.eval()
@@ -217,7 +214,7 @@ class ModelClass:
             distances_to_medoid = np.linalg.norm(cluster_data - cluster_centers[i].numpy(), axis=1)
 
             # Sort distances and extract the top 10 indices
-            closest_to_medoid_indices = np.argsort(distances_to_medoid)[:10]
+            closest_to_medoid_indices = np.argsort(distances_to_medoid)[:self.num_samples]
             closest_to_medoid_indices = [cluster_data_indices[idx] for idx in closest_to_medoid_indices]  # Map back to original indices
             subset_indices.extend(closest_to_medoid_indices)
 
@@ -226,7 +223,106 @@ class ModelClass:
         print(subset_indices)
         return torch.tensor(subset_indices)
 
+    def _get_LSS_sample(self, full_dataset):
+        ### LSS STEP 1: FEATURE EXTRACTOR ###
 
+        #Extract the features of all unlabelled datapoints
+        feature_extractor = nn.Sequential(*list((self._get_model()).children())[:-1]) #Select all layers except the last]
+        feature_extractor.eval()
+
+        #print('Feature Extractor:', feature_extractor)
+        train_features = []
+        for image, _ in full_dataset:
+            with torch.no_grad():
+                features = feature_extractor(image.unsqueeze(0))
+            train_features.append(features.squeeze().flatten().numpy())
+        train_features = np.array(train_features)
+
+        full_dataset = train_features
+        print('Full Dataset Shape:', full_dataset.shape)
+        
+        ### Normalize the feature vectors ###
+
+        ###  "Finally we smooth them by representing the data as a graph and propagating the features of the data points to their closest neighbors... " ###
+
+
+        ### Apply soft k-means clustering ###
+        def soft_kmeans(X, k, beta=1.0, max_iters=100, tol=1e-4):
+            n_samples, n_features = X.shape
+            
+            # Initialize centroids randomly
+            np.random.seed(self.seed)
+            centroids = X[np.random.choice(n_samples, k, replace=False)]
+            
+            for _ in range(max_iters):
+                # Compute distances and soft assignments
+                distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
+                soft_assignments = np.exp(-distances ** 2 / beta)
+                soft_assignments /= np.sum(soft_assignments, axis=1, keepdims=True)
+                
+                # Update centroids
+                new_centroids = np.dot(soft_assignments.T, X) / np.sum(soft_assignments, axis=0, keepdims=True).T
+                
+                # Check for convergence
+                if np.linalg.norm(new_centroids - centroids) < tol:
+                    break
+                
+                centroids = new_centroids
+            
+            return centroids, soft_assignments
+        
+        k = 47
+
+        # Run Soft K-means algorithm
+        centroids, soft_assignments = soft_kmeans(full_dataset, k)
+        
+        ### Compute LPR ###
+
+        #Compute Log Density
+        #What should the k be here since it's a soft assignment?
+        #log_density = np.log(1/(np.sqrt(2*np.pi)*np.std(Each_k))) - (1/(2*np.std(Each_k)))*(full_dataset - np.mean(Each_k)**2) #shape: (num_samples, 47)
+        #lprk = log_density/np.sum(log_density, axis=1) #Shape: (num_samples, 47)
+
+        #I think we jsut need the last one?
+        soft_assignment = soft_assignment #Shape: (num_samples, 47)
+        full_dataset = full_dataset #Shape: (num_samples, feature_dim)
+
+        sum_zs_in_cf = np.matmul(soft_assignment.T, full_dataset) #Shape: (47, feature_dim), I'm thinking this is the weighted probability per class
+        abs_cf = np.sum(soft_assignments, axis = 1) #Shape: (47), I'm thinking this should be the total sum of the probabilities for each class
+        mean_cf = sum_zs_in_cf/abs_cf #shape: (47, feature_dim)
+        lpr = ((full_dataset - mean_cf)**2)/np.sum((full_dataset - mean_cf)**2) #(num_samples, 47)
+
+        ### Iterate through the sampling process ###
+        subset_indices = []
+        #On the first iteration, select the sample with the lowest LPR (The most confident one)
+        min_row_indices = np.argmin(lpr, axis=0)
+        subset_indices.extend(min_row_indices)
+
+        #For the next N-1 samples, select the N-1 samples with the highest LPR (The least confident ones)
+        # Initialize an empty list to store the indices
+        subset_indices_list = []
+
+        # Loop through each column
+        for col in range(47):
+            # Find the row indices where the current column is the highest
+            max_column_indices = np.argmax(lpr[:, col])
+            # Filter the rows where the current column is the highest
+            rows_with_max_column = lpr[lpr[:, col] == lpr[max_column_indices, col]]
+            # Find the row indices where the current column is the lowest among the filtered rows
+            num_extra_samples = self.num_samples - 1
+            min_row_indices = np.argsort(rows_with_max_column[:, col])[:num_extra_samples]
+            # Get the original indices of the filtered rows
+            original_indices = np.where(np.isin(lpr, rows_with_max_column[min_row_indices]))
+            # Append the original indices to the list
+            subset_indices_list.extend(original_indices[0])
+
+        # Convert the list to a numpy array
+        subset_indices_array = np.array(subset_indices_list)
+        subset_indices.extend(subset_indices_array)
+
+        print(subset_indices)
+        return torch.tensor(subset_indices)
+    
     def _get_model(self):
         """
         Utility function that initializes and configures the machine learning model
