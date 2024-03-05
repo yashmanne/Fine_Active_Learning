@@ -17,6 +17,7 @@ from sklearn_extra.cluster import KMedoids
 from sklearn.metrics.pairwise import pairwise_distances_argmin_min
 from scipy.spatial import distance
 
+from model_based_RandomStart import ModelAL
 
 class ModelClass:
     """
@@ -49,7 +50,7 @@ class ModelClass:
             dataset_name (str): Name of the dataset.
             preprocess_transform (torchvision.transforms.Compose, optional): Preprocessing transformation for input data.
             AL_method (str, optional): Active learning method. Default is SimpleRandom
-                Options: 'SimpleRandom', 'StratifiedRandomSample', 'K-Medoids',
+                Options: 'SimpleRandom', 'StratifiedRandomSample', 'K-Medoids', 'LSS'
             num_samples (int): Number of samples per class to subset original dataset. Default is 5
             seed (int): Random seed for reproducibility. Default is 1
         """
@@ -69,7 +70,6 @@ class ModelClass:
         }
         self.num_classes = all_dataset_classes[self.dataset]
         self.AL_method = AL_method if AL_method else 'SimpleRandom'
-        print(AL_method)
         self.num_samples = num_samples
         # Note that the train/test for Flowers102 is 10xNclasses so num_samples must be <10
         if self.dataset == 'Flowers102':
@@ -597,7 +597,10 @@ def run_all_combinations(datasets, num_samples, al_methods, random_seeds, hyperp
             for al_m in tqdm(al_methods):
                 for rs in tqdm(random_seeds):
                     try:
-                        MC = ModelClass(dataset_name=dataset, AL_method=al_m, num_samples=num_s, seed=rs)
+                        if al_m in ['SimpleRandom', 'StratifiedRandomSample', 'K-Medoids', 'LSS']:
+                            MC = ModelClass(dataset_name=dataset, AL_method=al_m, num_samples=num_s, seed=rs)
+                        else:
+                            MC = ModelAL(dataset_name=dataset, AL_method=al_m, num_samples=num_s, seed=rs)
                     except Exception as E:
                         print(f"ModelClass can't be instantiated with this combination {dataset}, {num_s}, {al_m}, {rs}.")
                         print(E)

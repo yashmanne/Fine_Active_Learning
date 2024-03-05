@@ -18,15 +18,15 @@ from train_logging import ModelClass
 
 class ModelAL(ModelClass):
     def __init__(self, dataset_name, preprocess_transform=None, AL_method=None, num_samples=5, seed=1,
-                 cold_start_n=5, cold_start_epochs=5, cold_start_method='SimpleRandom'):
+                 cold_start_n=3, cold_start_epochs=5, cold_start_method='SimpleRandom'):
         """
         Initializes ModelClass with the specified parameters.
 
         Parameters:
             dataset_name (str): Name of the dataset.
             preprocess_transform (torchvision.transforms.Compose, optional): Preprocessing transformation for input data.
-            AL_method (str, optional): Active learning method. Default is SimpleRandom
-                Options: 'SimpleRandom', 'StratifiedRandomSample', 'K-Medoids',
+            AL_method (str, optional): Active learning method. Default is 'Entropy'
+                Options: 'Entropy', 'LeastMargin', 'LeastConfidence',
             num_samples (int): Number of samples per class to subset original dataset. Default is 5
             seed (int): Random seed for reproducibility. Default is 1
             cold_start_n (float): number of samples to use for cold-start training.
@@ -38,8 +38,13 @@ class ModelAL(ModelClass):
         self.cold_start_num_samples = cold_start_n
         self.cold_start_epochs = cold_start_epochs
         self.cold_start_method = cold_start_method
+        # get cold_start_train_subset with correct n_samples
+        self.num_samples = self.cold_start_num_samples
+        self.train_subset = self.get_data_subsets(split='train')
+        self.num_samples = num_samples - self.cold_start_num_samples
         self.cold_start_train_subset = self.train_subset
-        self.actual_AL_method = AL_method
+        # set actual method
+        self.AL_method = AL_method if AL_method else 'Entropy'
 
     def train_model(self, wandb_config=None, lr=None,
                         batch_size=None, num_epochs=None, return_model=True):
@@ -80,7 +85,7 @@ class ModelAL(ModelClass):
         self.train_subset = self.get_train_subset()
 
         # Call train_model_inner function
-        config['epochs'] = OG_epochs
+        config['epochs'] = OG_epochs - self.cold_start_epochs
         model, best_val_loss = self.train_model_inner(
             model=model, config=config, train_subset=self.train_subset,
             lr=lr, batch_size=batch_size, num_epochs=self.cold_start_epochs, log_test=True)
@@ -94,12 +99,12 @@ class ModelAL(ModelClass):
     def get_train_subset(self):
         full_dataset = self.dataset_module(root="./data/", split='train',
                                            transform=self.preprocess_transform, download=True)
-        if self.AL_method == "entropy":
-            subset_indices = self._prob_based_indices(full_dataset, method='entropy')
-        elif self.AL_method == "least confidence":
-            subset_indices = self._prob_based_indices(full_dataset, method='least confidence')
-        elif self.AL_method == "least margin":
-            subset_indices = self._prob_based_indices(full_dataset, method='least margin')
+        if self.AL_method == "Entropy":
+            subset_indices = self._prob_based_indices(full_dataset, method='Entropy')
+        elif self.AL_method == "LeastConfidence":
+            subset_indices = self._prob_based_indices(full_dataset, method='LeastConfidence')
+        elif self.AL_method == "LeastMargin":
+            subset_indices = self._prob_based_indices(full_dataset, method='LeastMargin')
         else:
             raise ValueError(f"AL method {self.AL_method} not implemented")
 
@@ -107,7 +112,7 @@ class ModelAL(ModelClass):
 
         return sub_dataset
 
-    def _prob_based_indices(self, full_dataset, method='entropy'):
+    def _prob_based_indices(self, full_dataset, method='Entropy'):
         torch.seed(self.seed)
         total_samples = self.num_samples * self.num_classes
         full_dl = DataLoader(dataset=full_dataset, batch_size=128,
@@ -124,11 +129,11 @@ class ModelAL(ModelClass):
             outputs = model(images)
             probs = outputs.softmax(dim=1)  # N x C
             tmp_scores = None
-            if method == 'entropy':
+            if method == 'Entropy':
                 tmp_scores = torch.sum(-probs * torch.log(probs + 1e-8), dim=1)    # NxC
-            elif method == 'least_confidence':
+            elif method == 'LeastConfidence':
                 tmp_scores = 1 - torch.max(probs, dim=1).values    # NxC
-            elif method == 'least_margin':
+            elif method == 'LeastMargin':
                 top_k = torch.topk(probs, 2, dim=1).values
                 tmp_scores = 1 - (top_k[:, 0] - top_k[:, 1])
 
