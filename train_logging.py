@@ -49,7 +49,7 @@ class ModelClass:
             dataset_name (str): Name of the dataset.
             preprocess_transform (torchvision.transforms.Compose, optional): Preprocessing transformation for input data.
             AL_method (str, optional): Active learning method. Default is SimpleRandom
-                Options: 'SimpleRandom', 'StratifiedRandomSample',
+                Options: 'SimpleRandom', 'StratifiedRandomSample', 'K-Medoids',
             num_samples (int): Number of samples per class to subset original dataset. Default is 5
             seed (int): Random seed for reproducibility. Default is 1
         """
@@ -144,8 +144,8 @@ class ModelClass:
         elif sample_method == 'StratifiedRandomSample':
             subset_indices = self._get_stratified_random_sample(full_dataset)
 
-        elif sample_method == 'K-Mediods':
-            subset_indices = self._get_K_medioids_sample(full_dataset)
+        elif sample_method == 'K-Medoids':
+            subset_indices = self._get_K_medoids_sample(full_dataset)
         else:
             raise ValueError(f"AL method {sample_method} not implemented")
         return subset_indices
@@ -173,7 +173,7 @@ class ModelClass:
             subset_indices.extend(indices[:self.num_samples])
         return torch.tensor(subset_indices)
 
-    def _get_K_medioids_sample(self, full_dataset):
+    def _get_K_medoids_sample(self, full_dataset):
 
         # Define a function to calculate the uncertainty or informativeness
         def calculate_uncertainty(cluster, cluster_center):
