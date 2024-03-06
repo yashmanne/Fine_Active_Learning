@@ -76,18 +76,19 @@ class ModelAL(ModelClass):
                 })
         config = wandb.config
         OG_epochs = config.get("epochs")
-        config['epochs'] = self.cold_start_epochs
         # Call train_model_inner function
         model, best_val_loss = self.train_model_inner(
-            model=model, config=config, train_subset=self.cold_start_train_subset)
+            model=model, config=config, train_subset=self.cold_start_train_subset,
+            epochs=self.cold_start_epochs)
         # Now, get new subset of train_data based on the current model.
         self.model = model
         self.train_subset = self.get_train_subset()
 
         # Call train_model_inner function
-        config['epochs'] = OG_epochs - self.cold_start_epochs
+        new_epochs = OG_epochs - self.cold_start_epochs
         model, best_val_loss = self.train_model_inner(
-            model=model, config=config, train_subset=self.train_subset, log_test=True)
+            model=model, config=config, train_subset=self.train_subset,
+            epochs=new_epochs, log_test=True)
 
         # output model
         run_id = wandb.run.id
@@ -154,7 +155,7 @@ class ModelAL(ModelClass):
 
         return ind_indices
 
-    def train_model_inner(self, model, config, train_subset, log_test=False):
+    def train_model_inner(self, model, config, train_subset, epochs=None, log_test=False):
         """
         Trains the machine learning model & logs the runs to WandB.
 
@@ -167,6 +168,8 @@ class ModelAL(ModelClass):
         Returns:
             torch.nn.Module: Trained machine learning model.
         """
+        if epochs is None:
+            epochs = config.epochs
         torch.manual_seed(self.seed)
         # Get Train, Val, Test DataLoaders
         train_loader = DataLoader(dataset=train_subset, batch_size=config.batch_size,
@@ -190,7 +193,7 @@ class ModelAL(ModelClass):
         patience_counter = 0
 
         # Start training
-        for epoch in trange(config.epochs):
+        for epoch in trange(epochs):
             print(f"Epoch {epoch + 1}/{config.epochs}")
             print('-' * 10)
             # Training Phase
