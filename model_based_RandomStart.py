@@ -142,9 +142,11 @@ class ModelAL(ModelClass):
             # Update set of final_indices & scores
             # concat if they exist
             if ind_indices is None:
-                ind_indices = inds
-                all_scores = tmp_scores
+                ind_indices = inds.to(self.device)
+                all_scores = tmp_scores.to(self.device)
             else:
+                inds = inds.to(self.device)
+                tmp_scores = tmp_scores.to(self.device)
                 ind_indices = torch.concat([ind_indices, inds])
                 all_scores = torch.concat([all_scores, tmp_scores])
             # if the size is too large, keep only the top total_samples
@@ -194,7 +196,7 @@ class ModelAL(ModelClass):
 
         # Start training
         for epoch in trange(epochs):
-            print(f"Epoch {epoch + 1}/{config.epochs}")
+            print(f"Epoch {epoch + 1}/{epochs}")
             print('-' * 10)
             # Training Phase
             model.train()
