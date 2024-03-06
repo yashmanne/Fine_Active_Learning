@@ -39,7 +39,7 @@ class ModelClass:
                  dataset_name,
                  preprocess_transform=None,
                  AL_method=None,
-                 num_samples=5,
+                 num_samples=10,
                  seed=1):
         """
         Initializes ModelClass with the specified parameters.
@@ -49,7 +49,7 @@ class ModelClass:
             preprocess_transform (torchvision.transforms.Compose, optional): Preprocessing transformation for input data.
             AL_method (str, optional): Active learning method. Default is SimpleRandom
                 Options: 'SimpleRandom', 'StratifiedRandomSample', 'K-Medoids', 'LSS'
-            num_samples (int): Number of samples per class to subset original dataset. Default is 5
+            num_samples (int): Number of samples per class to subset original dataset. Default is 10
             seed (int): Random seed for reproducibility. Default is 1
         """
         self.seed = seed
