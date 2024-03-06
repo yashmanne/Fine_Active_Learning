@@ -18,7 +18,7 @@ from train_logging import ModelClass
 
 class ModelAL(ModelClass):
     def __init__(self, dataset_name, preprocess_transform=None, AL_method=None, num_samples=10, seed=1,
-                 cold_start_n=5, cold_start_epochs=5, cold_start_method='SimpleRandom'):
+                 cold_start_n=5, cold_start_epochs=20, cold_start_method='SimpleRandom'):
         """
         Initializes ModelClass with the specified parameters.
 
@@ -30,7 +30,7 @@ class ModelAL(ModelClass):
             num_samples (int): Number of samples per class to subset original dataset. Default is 10
             seed (int): Random seed for reproducibility. Default is 1
             cold_start_n (float): number of samples to use for cold-start training. Default is 5
-            cold_start_epochs (float): number of epochs to train using cold-start-method.
+            cold_start_epochs (float): number of epochs to train using cold-start-method. Default is 20
             cold_start_method (str): Sampling method to initialize model training. Options: 'SimpleRandom', 'StratifiedRandomSample', 'K-Medoids'
         """
         super().__init__(dataset_name=dataset_name, preprocess_transform=preprocess_transform,
