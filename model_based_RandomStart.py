@@ -112,7 +112,7 @@ class ModelAL(ModelClass):
         return sub_dataset
 
     def _prob_based_indices(self, full_dataset, method='Entropy'):
-        torch.seed(self.seed)
+        torch.manual_seed(self.seed)
         total_samples = self.num_samples * self.num_classes
         full_dl = DataLoader(dataset=full_dataset, batch_size=128,
                              shuffle=False, pin_memory=True, num_workers=0)
@@ -122,7 +122,7 @@ class ModelAL(ModelClass):
         # Iterate over the dataset and collect indices for each class
         model = self.model
         model.eval()
-        for batch_id, (images, labels) in enumerate(full_dl):
+        for batch_id, (images, labels) in enumerate(tqdm(full_dl, desc="Gathering Entropy Scores")):
             images, labels = images.to(self.device), labels.to(self.device)
             # Forward pass
             outputs = model(images)
