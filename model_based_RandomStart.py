@@ -122,7 +122,7 @@ class ModelAL(ModelClass):
         # Iterate over the dataset and collect indices for each class
         model = self.model
         model.eval()
-        for batch_id, (images, labels) in enumerate(tqdm(full_dl, desc="Gathering Entropy Scores")):
+        for batch_id, (images, labels) in enumerate(tqdm(full_dl, desc="Gathering Scores")):
             images, labels = images.to(self.device), labels.to(self.device)
             # Forward pass
             outputs = model(images)
