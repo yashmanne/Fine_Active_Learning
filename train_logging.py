@@ -202,25 +202,47 @@ class ModelClass:
 
         subset_indices = []
         # shuffle distance matrix
-        for i, medoid_idx in enumerate(kmedoids.medoid_indices_):
-            cluster_indices = (kmedoids.labels_ == i)
-            cluster_data_indices = np.where(cluster_indices)[0]  # Get indices directly using np.where
-            cluster_data = train_features[cluster_indices]
+        print('Kmed ind shape: ', kmedoids.medoid_indices_.shape)
+        kmedoids.medoid_indices_ = kmedoids.medoid_indices_[np.random.permutation(num_clusters)]
 
-            # Calculate distances to the medoid
-            distances_to_medoid = np.linalg.norm(cluster_data - cluster_centers[i].numpy(), axis=1)
+        while (len(subset_indices)) < num_clusters*self.num_samples:
+            this_loop_list = []
+            for i, medoid_idx in enumerate(kmedoids.medoid_indices_):
+                cluster_indices = (kmedoids.labels_ == i)
+                cluster_data_indices = np.where(cluster_indices)[0]  # Get indices directly using np.where
 
-            # Sort distances and extract the top 10 indices
-            closest_to_medoid_indices = np.argsort(distances_to_medoid)[:self.num_samples]
-            closest_to_medoid_indices = [cluster_data_indices[idx] for idx in closest_to_medoid_indices]  # Map back to original indices
-            subset_indices.extend(closest_to_medoid_indices)
-            # add mask to set values to np.inf
-            # reloop to ensure len(subset_indices.unqiue() is the expected number of samples)
+                #MASK
+                cluster_data_indices = np.setdiff1d(cluster_data_indices, subset_indices)
+
+                #changed this from cdi to cd
+                cluster_data = full_dataset[cluster_data_indices]
+
+                # Calculate distances to the medoid
+                distances_to_medoid = np.linalg.norm(cluster_data - cluster_centers[i].numpy(), axis=1)
+
+                # Mask Previous
+                print('dtm shape:', distances_to_medoid.shape)
+                # og_indices = [cluster_data_indices[idx] for idx in np.argsort(distances_to_medoid)]
+                # filtered_og_indices = np.setdiff1d(og_indices, subset_indices)
+
+                # Sort distances and extract the top 10 indices
+                closest_to_medoid_indices = np.argsort(distances_to_medoid)[:self.num_samples]
+                print('ctm shpae:', closest_to_medoid_indices.shape)
+                closest_to_medoid_indices = [cluster_data_indices[idx] for idx in closest_to_medoid_indices]  # Map back to original indices
+
+                #Mask 
+                filtered_og_indices = np.setdiff1d(closest_to_medoid_indices, subset_indices)
+                this_loop_list.extend(closest_to_medoid_indices)
+                # add mask to set values to np.inf
+                # reloop to ensure len(subset_indices.unqiue() is the expected number of samples)
+            subset_list = np.unique(this_loop_list)
+            remain_add = (num_clusters*self.num_samples) - len(subset_list)
+            subset_indices.extend(subset_list[:remain_add])
 
 
         #subset_indices = np.unique(subset_indices)  # Take unique indices
-
-        print(len(subset_indices), len(np.unique(subset_indices)))
+        print('indices:', subset_indices)
+        print('Compairson of unique: ', len(subset_indices), len(np.unique(subset_indices)))
         return torch.tensor(subset_indices)
 
     def _get_LSS_sample(self, full_dataset):
@@ -242,36 +264,48 @@ class ModelClass:
         print('Full Dataset Shape:', full_dataset.shape)
         
         ### Normalize the feature vectors ###
+        full_dataset = (full_dataset - np.mean(full_dataset, axis = 1).reshape(-1, 1))/np.std(full_dataset, axis = 1).reshape(-1, 1)
 
         ###  "Finally we smooth them by representing the data as a graph and propagating the features of the data points to their closest neighbors... " ###
 
-
+        np.random.seed(self.seed)
         ### Apply soft k-means clustering ###
         def soft_kmeans(X, k, beta=1.0, max_iters=100, tol=1e-4):
-            n_samples, n_features = X.shape
-            # TODO multiple intializations and track one with least overall distances
-            # Initialize centroids randomly
-            np.random.seed(self.seed)
-            centroids = X[np.random.choice(n_samples, k, replace=False)]
+            best_centroids_sum = np.inf
+            best_centroids = None
+            best_soft_assignments = None
+
+            #test out multiple orientations
+            for i in range(3):
+                n_samples, n_features = X.shape
+                # TODO multiple intializations and track one with least overall distances
+                # Initialize centroids randomly
+    
+                centroids = X[np.random.choice(n_samples, k, replace=False)]
+                
+                for _ in range(max_iters):
+                    # Compute distances and soft assignments
+                    distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
+                    print(distances.shape)
+                    soft_assignments = np.exp(-distances ** 2 / beta)
+                    print('SA', soft_assignments.shape)
+                    soft_assignments /= np.sum(soft_assignments, axis=0, keepdims=True)
+                    
+                    # Update centroids
+                    new_centroids = np.dot(soft_assignments.T, X) / np.sum(soft_assignments, axis=0, keepdims=True).T
+                    
+                    # Check for convergence
+                    if np.linalg.norm(new_centroids - centroids) < tol:
+                        break
+                    
+                    centroids = new_centroids
+
+                if np.sum(centroids) < best_centroids_sum:
+                    best_centroids = centroids
+                    best_soft_assignments = soft_assignments
+                    best_centroids_sum = np.sum(centroids)
             
-            for _ in range(max_iters):
-                # Compute distances and soft assignments
-                distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
-                print(distances.shape)
-                soft_assignments = np.exp(-distances ** 2 / beta)
-                print('SA', soft_assignments.shape)
-                soft_assignments /= np.sum(soft_assignments, axis=0, keepdims=True)
-                
-                # Update centroids
-                new_centroids = np.dot(soft_assignments.T, X) / np.sum(soft_assignments, axis=0, keepdims=True).T
-                
-                # Check for convergence
-                if np.linalg.norm(new_centroids - centroids) < tol:
-                    break
-                
-                centroids = new_centroids
-            
-            return centroids, soft_assignments
+            return best_centroids, best_soft_assignments
         
         k = self.num_classes
 
@@ -343,6 +377,7 @@ class ModelClass:
         # subset_indices.extend(subset_indices_array)
 
         print(subset_indices)
+        print(len(subset_indices), len(np.unique(subset_indices)))
         return torch.tensor(subset_indices)
     
     
