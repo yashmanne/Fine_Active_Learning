@@ -251,3 +251,89 @@ class ModelAL(ModelClass):
                                                            log_images=False)
             wandb.summary['test_accuracy'] = test_accuracy
         return model, best_val_loss
+
+    def hyperparameter_sweep(self, method='random', parameters_dict=None, max_runs=10,
+                             early_terminate_args=None, num_epochs=50):
+        """
+        Perform a Wandb hyperparameter sweep on existing model, dataset, num-samples, and seed.
+        Note: this might track the final ValAcc instead of the best ValAcc.
+        Parameters:
+            method (str): the method to choose hyperparameters.
+                Options: 'grid', 'random', 'bayes'
+            max_runs (int): the number of runs to consider for hyperparameter tuning. Default=10
+            parameters_dict (dict): a dictionary of hyperparameters to consider for model training.
+            early_terminate_args (dict): dict of args for Hyperband early termination. Default None
+            num_epochs (int): number of epochs to run each sweep. Default is 50
+        Returns:
+            None
+        """
+        # check method validity
+        valid_methods = ['random', 'grid', 'bayes']
+        assert method in valid_methods, f"Invalid method {method}, expected one of {valid_methods}."
+
+        # get default parameter_dict with distribution of min/max
+        if parameters_dict is None:
+            if method == 'grid':
+                lr_dict = {'values': [1e-3, 5e-4]}
+                bs_dict = {'value': 128}
+            else:
+                lr_dict = {
+                    'distribution': 'q_log_uniform_values',
+                    'max': 1e-1,
+                    'min': 1e-6,
+                    'q': 1e-8
+                }
+                bs_dict = {
+                    'distribution': 'q_log_uniform_values',
+                    'max': 128,
+                    'min': 8,
+                    'q': 8
+                }
+            parameters_dict = {
+                'epochs': {'value': num_epochs},
+                'lr': lr_dict,
+                'batch_size': bs_dict
+            }
+
+        # early_terminate?
+        # https://arxiv.org/pdf/1603.06560.pdf
+        # https://open.gitcode.host/wandb-docs/sweeps/configuration.html#stopping-criteria
+        # https://2020blogfor.github.io/posts/2020/04/hyperband/
+        # essentially checks at various iterations that our metric is logged (epochs for us)
+        # whether or not to keep training.
+        # ex. training method of s=3 and eta=2, max_iter checks at epoch: 6, 12 & 25
+        #     training method of eta=2, min_iter=5, checks at epoch 5, 10, 20, 40
+        if early_terminate_args is None:
+            early_terminate_args = {
+                'type': 'hyperband',
+                'min_iter': 5,  # minimum number of epochs to train before considering stopping
+                'eta': 2,       # the bracket multiplier
+                # 's': 2,         # total number of brackets
+                # 'max_iter': parameters_dict['epochs']['value'],
+            }
+        # set up sweep config dictionary
+        sweep_config = {
+            'method': method,
+            'metric': {'name': 'val/val_loss', 'goal': 'minimize'},
+            'parameters': parameters_dict,
+            'early_terminate': early_terminate_args
+        }
+
+        # delete early terminate if early_terminate_args doesn't have the right type
+        if early_terminate_args.get('type', None) is None:
+            del sweep_config['early_terminate']
+
+        # Get sweep_id that generates the next set of hyperparameters to try
+        sweep_id = wandb.sweep(sweep=sweep_config,
+                               project=f"{self.dataset}-{self.num_samples}-{self.AL_method}-{self.seed}")
+
+        # get original state_dict
+        # og_state_dict = copy.deepcopy(self.model.state_dict())
+        # define wrapper of objective function with 1 argument.
+        def objective_func(config=None):
+            self.model = self._get_model()
+            self.train_model(wandb_config=config, return_model=False)
+
+        # Get Agent to run sweeps
+        wandb.agent(sweep_id, function=objective_func, count=max_runs)
+        return
