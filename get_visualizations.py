@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, Subset
 
 from train_logging import ModelClass
 from model_based_RandomStart import ModelAL
+import pickle
 
 def get_features_from_images(full_dataset, ):
     pass
@@ -67,7 +68,7 @@ def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
             rs_dict[al_m] = al_dict
         valid_dict[rs] = val_inds
         result_dict[rs] = rs_dict
-    return result_dict
+    return result_dict, valid_dict
 
 def get_features_from_indices(seed):
     MC = ModelClass(dataset_name='DTD', AL_method='SimpleRandom', num_samples=40, seed=0)
@@ -85,3 +86,10 @@ def get_features_from_indices(seed):
         # Forward pass
         outputs = feature_extractor(images)
 
+if __name__ == '__main__':
+    train_dict, valid_dict = get_model_feature_vectors()
+    with open('train_dict.pickle', 'wb') as handle:
+        pickle.dump(train_dict, handle)
+
+    with open('valid_dict.pickle', 'wb') as handle:
+        pickle.dump(valid_dict, handle)
