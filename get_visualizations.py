@@ -48,7 +48,7 @@ def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
                     valid_set = MC.valid_subset
                     # Train for coldstart time.
                     train_list = []
-                    for lr in lrs:
+                    for lr in tqdm(lrs, desc='lr'):
                         config = {
                             "lr": lr,
                             "batch_size": 128

@@ -174,15 +174,21 @@ class ModelAL(ModelClass):
             epochs = config.epochs
         torch.manual_seed(self.seed)
         # Get Train, Val, Test DataLoaders
-        train_loader = DataLoader(dataset=train_subset, batch_size=config.batch_size,
+        try:
+            batch_size = config.batch_size
+            lr = config.lr
+        except:
+            batch_size = config['batch_size']
+            lr = config['lr']
+        train_loader = DataLoader(dataset=train_subset, batch_size=batch_size,
                                   shuffle=True, pin_memory=True, num_workers=0)
-        val_loader = DataLoader(dataset=self.valid_subset, batch_size=config.batch_size,
+        val_loader = DataLoader(dataset=self.valid_subset, batch_size=batch_size,
                                 shuffle=False, pin_memory=True, num_workers=0)
-        test_loader = DataLoader(dataset=self.test_subset, batch_size=config.batch_size,
+        test_loader = DataLoader(dataset=self.test_subset, batch_size=batch_size,
                                  shuffle=False, pin_memory=True, num_workers=0)
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         # Train the model
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

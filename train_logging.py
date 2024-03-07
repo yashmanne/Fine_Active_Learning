@@ -132,7 +132,7 @@ class ModelClass:
         Returns:
            torch.Tensor: Indices for the subset.
         """
-        print(sample_method)
+        # print(sample_method)
         if sample_method is None:
             sample_method = self.AL_method
         if sample_method == 'SimpleRandom':
@@ -221,13 +221,13 @@ class ModelClass:
                 distances_to_medoid = np.linalg.norm(cluster_data - cluster_centers[i].numpy(), axis=1)
 
                 # Mask Previous
-                print('dtm shape:', distances_to_medoid.shape)
+                # print('dtm shape:', distances_to_medoid.shape)
                 # og_indices = [cluster_data_indices[idx] for idx in np.argsort(distances_to_medoid)]
                 # filtered_og_indices = np.setdiff1d(og_indices, subset_indices)
 
                 # Sort distances and extract the top 10 indices
                 closest_to_medoid_indices = np.argsort(distances_to_medoid)[:self.num_samples]
-                print('ctm shpae:', closest_to_medoid_indices.shape)
+                # print('ctm shpae:', closest_to_medoid_indices.shape)
                 closest_to_medoid_indices = [cluster_data_indices[idx] for idx in closest_to_medoid_indices]  # Map back to original indices
 
                 #Mask 
@@ -242,7 +242,7 @@ class ModelClass:
 
         #subset_indices = np.unique(subset_indices)  # Take unique indices
         print('indices:', subset_indices)
-        print('Compairson of unique: ', len(subset_indices), len(np.unique(subset_indices)))
+        print('Comparison of unique: ', len(subset_indices), len(np.unique(subset_indices)))
         return torch.tensor(subset_indices)
 
     def _get_LSS_sample(self, full_dataset):
