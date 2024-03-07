@@ -79,7 +79,7 @@ class ModelAL(ModelClass):
         # Call train_model_inner function
         model, best_val_loss = self.train_model_inner(
             model=model, config=config, train_subset=self.cold_start_train_subset,
-            epochs=self.cold_start_epochs)
+            epochs=self.cold_start_epochs, log_wandb=True)
         # Now, get new subset of train_data based on the current model.
         self.model = model
         self.train_subset = self.get_train_subset()
@@ -157,7 +157,7 @@ class ModelAL(ModelClass):
 
         return ind_indices
 
-    def train_model_inner(self, model, config, train_subset, epochs=None, log_test=False):
+    def train_model_inner(self, model, config, train_subset, epochs=None, log_test=False, log_wandb=True):
         """
         Trains the machine learning model & logs the runs to WandB.
 
@@ -218,11 +218,12 @@ class ModelAL(ModelClass):
             # log_images=(epoch == (config.epochs - 1)))
             epoch_loss = running_loss / len(train_loader.dataset)
             # Log epoch metrics in wandb
-            epoch_metrics = {
-                "train/epoch_loss": epoch_loss,
-                "val/val_loss": val_loss,
-                "val/val_accuracy": val_accuracy}
-            wandb.log(epoch_metrics)
+            if log_wandb:
+                epoch_metrics = {
+                    "train/epoch_loss": epoch_loss,
+                    "val/val_loss": val_loss,
+                    "val/val_accuracy": val_accuracy}
+                wandb.log(epoch_metrics)
             print(
                 f"Training Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}")
             if val_loss < best_val_loss:
@@ -238,23 +239,25 @@ class ModelAL(ModelClass):
                     break
         # Log the best model to Wandb
         # (dataset so that we log a model for each run rather than 1 per project)
-        artifact = wandb.Artifact(name="best-model", type="dataset")
-        artifact.add_file(local_path='./best_model.pth')
-        wandb.log_artifact(artifact)
+        if log_wandb:
+            artifact = wandb.Artifact(name="best-model", type="dataset")
+            artifact.add_file(local_path='./best_model.pth')
+            wandb.log_artifact(artifact)
 
         # Calculate best test performance
         model.load_state_dict(torch.load('./best_model.pth'))
         # self.model = model
         model.eval()
         # Log best val_loss at the end again
-        wandb.log({
-            "val/val_loss": best_val_loss,
-            "val/val_accuracy": acc_at_best_val_loss
-        })
-        if log_test:
-            test_loss, test_accuracy = self.validate_model(model, valid_dl=test_loader, loss_func=criterion,
-                                                           log_images=False)
-            wandb.summary['test_accuracy'] = test_accuracy
+        if log_wandb:
+            wandb.log({
+                "val/val_loss": best_val_loss,
+                "val/val_accuracy": acc_at_best_val_loss
+            })
+            if log_test:
+                test_loss, test_accuracy = self.validate_model(model, valid_dl=test_loader, loss_func=criterion,
+                                                               log_images=False)
+                wandb.summary['test_accuracy'] = test_accuracy
         return model, best_val_loss
 
     def hyperparameter_sweep(self, method='random', parameters_dict=None, max_runs=10,
