@@ -22,11 +22,15 @@ def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
     if lrs is None:
         lrs = [1e-3, 5e-4]
     result_dict = {}
+    valid_dict = {}
     for rs in tqdm(seeds):
         rs_dict = {}
-        for al_m in AL_methods:
+        val_inds = {}
+        for al_m in tqdm(AL_methods):
+            print(f"Evaluating {al_m}")
             al_dict = {}
             for num_s in tqdm(num_samples):
+                print(f"Evaluating num_samples {num_s}")
                 num_sample = {}
                 if al_m in ['SimpleRandom', 'StratifiedRandomSample', 'K-Medoids', 'LSS']:
                     MC = ModelClass(dataset_name='DTD', AL_method=al_m, num_samples=num_s, seed=rs)
@@ -37,6 +41,8 @@ def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
                     valid_set = MC.valid_subset
                     valid_indices = valid_set.indices
                     num_sample['train_ind'] = train_indices
+                    if val_inds.get(f'n_{num_s}', None) is None:
+                        val_inds[f'n_{num_s}'] = valid_indices.tolist()
                 else:
                     MC = ModelAL(dataset_name='DTD', AL_method=al_m, num_samples=num_s, seed=rs)
                     valid_set = MC.valid_subset
@@ -44,8 +50,8 @@ def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
                     train_list = []
                     for lr in lrs:
                         config = {
-                         "lr": lr,
-                         "batch_size": 128
+                            "lr": lr,
+                            "batch_size": 128
                         }
                         MC.model = MC._get_model()
                         model, best_val_loss = MC.train_model_inner(
@@ -54,9 +60,14 @@ def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
                         MC.model = model
                         train_set = MC.get_train_subset()
                         train_indices = train_set.indices
-                        train_list.append((lr, train_indices))
+                        train_list.append((lr, train_indices.tolist()))
                     num_sample['train_ind'] = train_list
 
+                al_dict[num_s] = num_sample
+            rs_dict[al_m] = al_dict
+        valid_dict[rs] = val_inds
+        result_dict[rs] = rs_dict
+    return result_dict
 
 def get_features_from_indices(seed):
     MC = ModelClass(dataset_name='DTD', AL_method='SimpleRandom', num_samples=40, seed=0)
