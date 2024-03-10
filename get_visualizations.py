@@ -8,14 +8,16 @@ from train_logging import ModelClass
 from model_based_RandomStart import ModelAL
 import pickle
 
+
 def get_features_from_images(full_dataset, ):
     pass
+
 
 def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
                               lrs=None):
     if AL_methods is None:
         AL_methods = ['SimpleRandom', 'StratifiedRandomSample', 'K-Medoids', "LSS",
-                       'Entropy', 'LeastConfidence', 'LeastMargin']
+                      'Entropy', 'LeastConfidence', 'LeastMargin']
     if seeds is None:
         seeds = [0, 1, 2]
     if num_samples is None:
@@ -70,7 +72,8 @@ def get_model_feature_vectors(AL_methods=None, seeds=None, num_samples=None,
         result_dict[rs] = rs_dict
     return result_dict, valid_dict
 
-def get_features_from_indices(seed):
+
+def get_features_from_indices():
     MC = ModelClass(dataset_name='DTD', AL_method='SimpleRandom', num_samples=40, seed=0)
     feature_extractor = nn.Sequential(*list((MC.model).children())[:-1])  # Select all layers except the last]
     feature_extractor.eval()
@@ -78,13 +81,19 @@ def get_features_from_indices(seed):
     full_dl = DataLoader(dataset=MC.train_subset, batch_size=128,
                          shuffle=False, pin_memory=True, num_workers=0)
     # Initialize a list to hold indices for each class
-    ind_indices = None
-    all_scores = None
+    all_outputs = None
     # Iterate over the dataset and collect feature_vectors
     for batch_id, (images, labels) in enumerate(tqdm(full_dl, desc="Gathering values")):
         images, labels = images.to(MC.device), labels.to(MC.device)
         # Forward pass
         outputs = feature_extractor(images)
+        if all_outputs is None:
+            all_outputs = outputs
+        else:
+            all_outputs = torch.concat([all_outputs, outputs])
+
+    return all_outputs
+
 
 if __name__ == '__main__':
     train_dict, valid_dict = get_model_feature_vectors()
